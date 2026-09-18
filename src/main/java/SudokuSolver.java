@@ -1,976 +1,1270 @@
 import javax.swing.*;
-import javax.swing.border.LineBorder;
+import javax.swing.border.Border;
+import javax.swing.text.AttributeSet;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.DocumentFilter;
+
 import java.awt.*;
-import java.awt.event.*;
-import java.io.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
+
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
+
 /**
  * Advanced Sudoku Solver
+ *
+ * Supported Sudoku sizes:
+ * 6 x 6  -> 2 x 3 boxes
+ * 9 x 9  -> 3 x 3 boxes
+ * 16 x 16 -> 4 x 4 boxes
+ *
  * Features:
  * - Random puzzle generation
+ * - Multiple difficulty levels
  * - Unique-solution verification
- * - MRV heuristic
- * - Constraint propagation through candidate calculation
- * - Animated backtracking
- * - Hint system
- * - Timer, mistakes and score
+ * - MRV based solving
+ * - Candidate checking
+ * - Backtracking
+ * - Animated solving
+ * - Hints
+ * - Validation
+ * - Timer
+ * - Score
+ * - Mistake counter
  * - Save / Load
- * - Difficulty levels
- *
- * Designed for Java 21+ (also suitable for newer JDKs such as Java 26).
  */
 public class SudokuSolver extends JFrame {
 
-    private static final int SIZE = 9;
-    private static final int BOX = 3;
-    private static final int EMPTY = 0;
+    private static final long serialVersionUID = 1L;
 
-    private final JTextField[][] cells = new JTextField[SIZE][SIZE];
-    private final int[][] solution = new int[SIZE][SIZE];
-    private final int[][] originalPuzzle = new int[SIZE][SIZE];
+    // ------------------------------------------------------------
+    // Sudoku configuration
+    // ------------------------------------------------------------
+
+    private int SIZE = 9;
+    private int BOX_ROWS = 3;
+    private int BOX_COLS = 3;
+
+    // ------------------------------------------------------------
+    // GUI
+    // ------------------------------------------------------------
+
+    private JPanel boardPanel;
+
+    private JTextField[][] cells;
+
+    private JComboBox<String> sizeBox;
+    private JComboBox<String> difficultyBox;
+
+    private JButton newPuzzleButton;
+    private JButton solveButton;
+    private JButton animateButton;
+    private JButton hintButton;
+    private JButton validateButton;
+    private JButton saveButton;
+    private JButton loadButton;
+    private JButton clearButton;
+
+    private JLabel timerLabel;
+    private JLabel mistakesLabel;
+    private JLabel hintsLabel;
+    private JLabel scoreLabel;
+    private JLabel statusLabel;
+
+    // ------------------------------------------------------------
+    // Sudoku data
+    // ------------------------------------------------------------
+
+    private int[][] originalPuzzle;
+    private int[][] solution;
+
+    // ------------------------------------------------------------
+    // Game information
+    // ------------------------------------------------------------
+
+    private int mistakes = 0;
+    private int hints = 0;
+
+    private boolean gameRunning = false;
+    private boolean gameBusy = false;
+
+    private long startTime = 0;
+    private long finalElapsedTime = 0;
+
+    private javax.swing.Timer gameTimer;
 
     private final Random random = new Random();
 
-    private JComboBox<String> difficultyBox;
-    private JButton newPuzzleButton, solveButton, validateButton;
-    private JButton clearButton, resetButton, hintButton;
-    private JButton animateButton, saveButton, loadButton;
-    private JLabel timerLabel, mistakesLabel, scoreLabel, statusLabel;
-
-    private Timer gameTimer;
-    private long startTime;
-    private int mistakes;
-    private int hintsUsed;
-    private boolean gameRunning;
-    private boolean busy;
+    // ------------------------------------------------------------
+    // Constructor
+    // ------------------------------------------------------------
 
     public SudokuSolver() {
-        setTitle("Advanced Sudoku Solver - MRV + Backtracking");
-        setSize(820, 900);
+
+        setTitle("Advanced Sudoku Solver");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+
+        setLayout(new BorderLayout(10, 10));
+
+        createTopPanel();
+
+        boardPanel = new JPanel();
+        boardPanel.setBackground(Color.WHITE);
+
+        add(boardPanel, BorderLayout.CENTER);
+
+        createBottomPanel();
+
+        updateBoardConfiguration();
+        createGrid();
+
+        setMinimumSize(new Dimension(700, 750));
+        setSize(900, 850);
         setLocationRelativeTo(null);
 
-        buildUI();
-        attachEvents();
         generateNewPuzzle();
     }
 
-    private void buildUI() {
-        JPanel root = new JPanel(new BorderLayout(10, 10));
-        root.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+    // ============================================================
+    // TOP PANEL
+    // ============================================================
 
-        JLabel title = new JLabel("ADVANCED SUDOKU SOLVER", SwingConstants.CENTER);
-        title.setFont(new Font("Arial", Font.BOLD, 28));
+    private void createTopPanel() {
 
-        JLabel subtitle = new JLabel(
-                "MRV + Constraint Propagation + Backtracking",
-                SwingConstants.CENTER);
-        subtitle.setFont(new Font("Arial", Font.PLAIN, 14));
+        JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 8));
 
-        JPanel heading = new JPanel(new GridLayout(2, 1));
-        heading.add(title);
-        heading.add(subtitle);
-        root.add(heading, BorderLayout.NORTH);
+        JLabel sizeLabel = new JLabel("Size:");
 
-        JPanel gridPanel = new JPanel(new GridLayout(SIZE, SIZE));
-        createGrid(gridPanel);
-        root.add(gridPanel, BorderLayout.CENTER);
+        sizeBox = new JComboBox<>(
+                new String[] {
+                        "6 × 6",
+                        "9 × 9",
+                        "16 × 16"
+                }
+        );
 
-        JPanel bottom = new JPanel(new BorderLayout(5, 5));
+        sizeBox.setSelectedItem("9 × 9");
 
-        JPanel topControls = new JPanel(new FlowLayout());
-        topControls.add(new JLabel("Difficulty:"));
+        JLabel difficultyLabel = new JLabel("Difficulty:");
 
-        difficultyBox = new JComboBox<>(new String[]{"Easy", "Medium", "Hard"});
-        topControls.add(difficultyBox);
+        difficultyBox = new JComboBox<>(
+                new String[] {
+                        "Easy",
+                        "Medium",
+                        "Hard"
+                }
+        );
 
         newPuzzleButton = new JButton("New Puzzle");
-        topControls.add(newPuzzleButton);
-
-        bottom.add(topControls, BorderLayout.NORTH);
-
-        JPanel buttons1 = new JPanel(new FlowLayout());
         solveButton = new JButton("Solve");
         animateButton = new JButton("Animate Solve");
-        validateButton = new JButton("Validate");
         hintButton = new JButton("Hint");
-
-        buttons1.add(solveButton);
-        buttons1.add(animateButton);
-        buttons1.add(validateButton);
-        buttons1.add(hintButton);
-
-        JPanel buttons2 = new JPanel(new FlowLayout());
+        validateButton = new JButton("Validate");
         clearButton = new JButton("Clear");
-        resetButton = new JButton("Reset");
         saveButton = new JButton("Save");
         loadButton = new JButton("Load");
 
-        buttons2.add(clearButton);
-        buttons2.add(resetButton);
-        buttons2.add(saveButton);
-        buttons2.add(loadButton);
+        // --------------------------------------------------------
+        // IMPORTANT FIX #1
+        // New Puzzle only creates a new puzzle.
+        // --------------------------------------------------------
 
-        JPanel allButtons = new JPanel(new GridLayout(2, 1));
-        allButtons.add(buttons1);
-        allButtons.add(buttons2);
-        bottom.add(allButtons, BorderLayout.CENTER);
+        newPuzzleButton.addActionListener(e -> generateNewPuzzle());
 
-        JPanel info = new JPanel(new FlowLayout());
-        timerLabel = new JLabel("Time: 00:00");
-        mistakesLabel = new JLabel("Mistakes: 0");
-        scoreLabel = new JLabel("Score: 0");
-        statusLabel = new JLabel("Ready");
+        // --------------------------------------------------------
+        // IMPORTANT FIX #7
+        // Changing size changes configuration and creates a puzzle.
+        // --------------------------------------------------------
 
-        info.add(timerLabel);
-        info.add(Box.createHorizontalStrut(20));
-        info.add(mistakesLabel);
-        info.add(Box.createHorizontalStrut(20));
-        info.add(scoreLabel);
-        info.add(Box.createHorizontalStrut(20));
-        info.add(statusLabel);
+        sizeBox.addActionListener(e -> changeBoardSize());
 
-        bottom.add(info, BorderLayout.SOUTH);
-        root.add(bottom, BorderLayout.SOUTH);
+        difficultyBox.addActionListener(e -> {
 
-        setContentPane(root);
+            if (!gameBusy) {
+                generateNewPuzzle();
+            }
+        });
+
+        solveButton.addActionListener(e -> solveInstant());
+
+        animateButton.addActionListener(e -> animateSolve());
+
+        hintButton.addActionListener(e -> giveHint());
+
+        validateButton.addActionListener(e -> validateSudoku());
+
+        clearButton.addActionListener(e -> clearUserEntries());
+
+        saveButton.addActionListener(e -> savePuzzle());
+
+        loadButton.addActionListener(e -> loadPuzzle());
+
+        topPanel.add(sizeLabel);
+        topPanel.add(sizeBox);
+
+        topPanel.add(difficultyLabel);
+        topPanel.add(difficultyBox);
+
+        topPanel.add(newPuzzleButton);
+        topPanel.add(solveButton);
+        topPanel.add(animateButton);
+        topPanel.add(hintButton);
+        topPanel.add(validateButton);
+        topPanel.add(clearButton);
+        topPanel.add(saveButton);
+        topPanel.add(loadButton);
+
+        add(topPanel, BorderLayout.NORTH);
     }
 
-    private void createGrid(JPanel panel) {
+    // ============================================================
+    // BOTTOM PANEL
+    // ============================================================
+
+    private void createBottomPanel() {
+
+        JPanel bottomPanel = new JPanel(new BorderLayout());
+
+        JPanel informationPanel =
+                new JPanel(new FlowLayout(FlowLayout.CENTER, 20, 5));
+
+        timerLabel = new JLabel("Time: 00:00");
+
+        mistakesLabel = new JLabel("Mistakes: 0");
+
+        hintsLabel = new JLabel("Hints: 0");
+
+        scoreLabel = new JLabel("Score: 0");
+
+        statusLabel = new JLabel("Ready");
+
+        informationPanel.add(timerLabel);
+        informationPanel.add(mistakesLabel);
+        informationPanel.add(hintsLabel);
+        informationPanel.add(scoreLabel);
+
+        bottomPanel.add(informationPanel, BorderLayout.CENTER);
+
+        JPanel statusPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
+
+        statusPanel.add(statusLabel);
+
+        bottomPanel.add(statusPanel, BorderLayout.SOUTH);
+
+        add(bottomPanel, BorderLayout.SOUTH);
+    }
+
+    // ============================================================
+    // BOARD CONFIGURATION
+    // ============================================================
+
+    private void updateBoardConfiguration() {
+
+        String selected = sizeBox.getSelectedItem().toString();
+
+        if (selected.startsWith("6")) {
+
+            SIZE = 6;
+            BOX_ROWS = 2;
+            BOX_COLS = 3;
+
+        } else if (selected.startsWith("9")) {
+
+            SIZE = 9;
+            BOX_ROWS = 3;
+            BOX_COLS = 3;
+
+        } else if (selected.startsWith("16")) {
+
+            SIZE = 16;
+            BOX_ROWS = 4;
+            BOX_COLS = 4;
+        }
+    }
+
+    // ============================================================
+    // CHANGE BOARD SIZE
+    // ============================================================
+
+    private void changeBoardSize() {
+
+        if (gameBusy) {
+            return;
+        }
+
+        updateBoardConfiguration();
+
+        stopGameTimer();
+
+        mistakes = 0;
+        hints = 0;
+        finalElapsedTime = 0;
+
+        createGrid();
+
+        generateNewPuzzle();
+    }
+
+    // ============================================================
+    // CREATE GRID
+    // ============================================================
+
+    private void createGrid() {
+
+        boardPanel.removeAll();
+
+        boardPanel.setLayout(
+                new GridLayout(SIZE, SIZE, 0, 0)
+        );
+
+        cells = new JTextField[SIZE][SIZE];
+
+        int fontSize;
+
+        if (SIZE == 6) {
+            fontSize = 28;
+        } else if (SIZE == 9) {
+            fontSize = 24;
+        } else {
+            fontSize = 18;
+        }
+
+        Font cellFont =
+                new Font("Arial", Font.BOLD, fontSize);
+
         for (int r = 0; r < SIZE; r++) {
+
             for (int c = 0; c < SIZE; c++) {
+
                 JTextField cell = new JTextField();
-                cell.setHorizontalAlignment(JTextField.CENTER);
-                cell.setFont(new Font("Arial", Font.BOLD, 21));
 
-                int top = (r % 3 == 0) ? 3 : 1;
-                int left = (c % 3 == 0) ? 3 : 1;
-                int bottom = (r == SIZE - 1) ? 3 : 1;
-                int right = (c == SIZE - 1) ? 3 : 1;
+                cell.setHorizontalAlignment(
+                        SwingConstants.CENTER
+                );
 
-                cell.setBorder(BorderFactory.createMatteBorder(
-                        top, left, bottom, right, Color.BLACK));
+                cell.setFont(cellFont);
+
+                cell.setBackground(Color.WHITE);
+
+                cell.setBorder(
+                        createCellBorder(r, c)
+                );
+
+                // ------------------------------------------------
+                // Safer input handling
+                // ------------------------------------------------
+
+                ((javax.swing.text.AbstractDocument)
+                        cell.getDocument())
+                        .setDocumentFilter(new SudokuSymbolFilter());
 
                 final int row = r;
                 final int col = c;
 
-                cell.addKeyListener(new KeyAdapter() {
-                    @Override
-                    public void keyTyped(KeyEvent e) {
-                        if (busy || !cell.isEditable()) {
-                            e.consume();
-                            return;
-                        }
+                cell.addActionListener(
+                        e -> processCell(row, col)
+                );
 
-                        char ch = e.getKeyChar();
-                        if (!Character.isDigit(ch) || ch == '0' ||
-                                cell.getText().length() >= 1) {
-                            e.consume();
-                        }
-                    }
+                cell.addFocusListener(
+                        new java.awt.event.FocusAdapter() {
 
-                    @Override
-                    public void keyReleased(KeyEvent e) {
-                        if (busy) return;
-                        if (cell.getText().isEmpty()) return;
+                            @Override
+                            public void focusLost(
+                                    java.awt.event.FocusEvent e) {
 
-                        int value = Character.digit(cell.getText().charAt(0), 10);
-                        if (value >= 1 && value <= 9) {
-                            checkUserMove(row, col, value);
+                                processCell(row, col);
+                            }
                         }
-                    }
-                });
+                );
+
+                cell.addMouseListener(
+                        new MouseAdapter() {
+
+                            @Override
+                            public void mouseClicked(
+                                    MouseEvent e) {
+
+                                highlightRelatedCells(row, col);
+                            }
+                        }
+                );
 
                 cells[r][c] = cell;
-                panel.add(cell);
+
+                boardPanel.add(cell);
             }
+        }
+
+        boardPanel.revalidate();
+        boardPanel.repaint();
+    }
+
+    // ============================================================
+    // DOCUMENT FILTER
+    // ============================================================
+
+    private class SudokuSymbolFilter extends DocumentFilter {
+
+        @Override
+        public void insertString(
+                FilterBypass fb,
+                int offset,
+                String string,
+                AttributeSet attr)
+                throws BadLocationException {
+
+            replace(fb, offset, 0, string, attr);
+        }
+
+        @Override
+        public void replace(
+                FilterBypass fb,
+                int offset,
+                int length,
+                String text,
+                AttributeSet attrs)
+                throws BadLocationException {
+
+            if (text == null) {
+                return;
+            }
+
+            text = text.toUpperCase();
+
+            if (text.isEmpty()) {
+                fb.replace(offset, length, "", attrs);
+                return;
+            }
+
+            // Only one symbol is allowed in a Sudoku cell.
+            char ch = text.charAt(0);
+
+            if (isValidSymbol(
+                    String.valueOf(ch))) {
+
+                fb.replace(
+                        offset,
+                        length,
+                        String.valueOf(ch),
+                        attrs
+                );
+            }
+        }
+
+        @Override
+        public void remove(
+                FilterBypass fb,
+                int offset,
+                int length)
+                throws BadLocationException {
+
+            fb.remove(offset, length);
         }
     }
 
-    private void attachEvents() {
-        newPuzzleButton.addActionListener(e -> generateNewPuzzle());
-        solveButton.addActionListener(e -> solveInstant());
-        animateButton.addActionListener(e -> animateSolve());
-        validateButton.addActionListener(e -> validateSudoku());
-        hintButton.addActionListener(e -> giveHint());
-        clearButton.addActionListener(e -> clearUserCells());
-        resetButton.addActionListener(e -> resetPuzzle());
-        saveButton.addActionListener(e -> savePuzzle());
-        loadButton.addActionListener(e -> loadPuzzle());
+    // ============================================================
+    // CELL BORDER
+    // ============================================================
 
-        gameTimer = new Timer(1000, e -> updateTimer());
+    private Border createCellBorder(int row, int col) {
+
+        int top =
+                row % BOX_ROWS == 0 ? 3 : 1;
+
+        int left =
+                col % BOX_COLS == 0 ? 3 : 1;
+
+        int bottom =
+                row == SIZE - 1 ? 3 :
+                (row + 1) % BOX_ROWS == 0 ? 3 : 1;
+
+        int right =
+                col == SIZE - 1 ? 3 :
+                (col + 1) % BOX_COLS == 0 ? 3 : 1;
+
+        return BorderFactory.createMatteBorder(
+                top,
+                left,
+                bottom,
+                right,
+                Color.BLACK
+        );
     }
 
-    // -------------------- PUZZLE GENERATION --------------------
+    // ============================================================
+    // PROCESS CELL
+    // ============================================================
+
+    private void processCell(int row, int col) {
+
+        if (originalPuzzle == null ||
+                cells == null) {
+            return;
+        }
+
+        if (originalPuzzle[row][col] != 0) {
+            return;
+        }
+
+        String text =
+                cells[row][col].getText()
+                        .trim()
+                        .toUpperCase();
+
+        if (text.isEmpty()) {
+            return;
+        }
+
+        int value = symbolToValue(text);
+
+        if (value < 1 || value > SIZE) {
+            cells[row][col].setText("");
+
+            mistakes++;
+
+            updateGameInformation();
+
+            return;
+        }
+
+        int[][] board = readBoard();
+
+        board[row][col] = 0;
+
+        if (!isSafe(
+                board,
+                row,
+                col,
+                value)) {
+
+            cells[row][col].setText("");
+
+            mistakes++;
+
+            cells[row][col].setBackground(
+                    new Color(255, 210, 210)
+            );
+
+            statusLabel.setText(
+                    "Incorrect entry!"
+            );
+
+            updateGameInformation();
+
+            return;
+        }
+
+        // --------------------------------------------------------
+        // Check against official solution.
+        // --------------------------------------------------------
+
+        if (solution != null &&
+                solution[row][col] != value) {
+
+            cells[row][col].setText("");
+
+            mistakes++;
+
+            cells[row][col].setBackground(
+                    new Color(255, 210, 210)
+            );
+
+            statusLabel.setText(
+                    "Incorrect value!"
+            );
+
+            updateGameInformation();
+
+            return;
+        }
+
+        cells[row][col].setBackground(
+                Color.WHITE
+        );
+
+        updateGameInformation();
+
+        if (isBoardComplete(board)) {
+            finishGame();
+        }
+    }
+
+    // ============================================================
+    // HIGHLIGHT RELATED CELLS
+    // ============================================================
+
+    private void highlightRelatedCells(
+            int selectedRow,
+            int selectedCol) {
+
+        if (cells == null) {
+            return;
+        }
+
+        for (int r = 0; r < SIZE; r++) {
+
+            for (int c = 0; c < SIZE; c++) {
+
+                if (originalPuzzle != null &&
+                        originalPuzzle[r][c] != 0) {
+
+                    cells[r][c].setBackground(
+                            new Color(235, 235, 235)
+                    );
+
+                } else {
+
+                    cells[r][c].setBackground(
+                            Color.WHITE
+                    );
+                }
+            }
+        }
+
+        // Same row
+        for (int c = 0; c < SIZE; c++) {
+            cells[selectedRow][c].setBackground(
+                    new Color(240, 240, 255)
+            );
+        }
+
+        // Same column
+        for (int r = 0; r < SIZE; r++) {
+            cells[r][selectedCol].setBackground(
+                    new Color(240, 240, 255)
+            );
+        }
+
+        // Same box
+        int startRow =
+                selectedRow -
+                selectedRow % BOX_ROWS;
+
+        int startCol =
+                selectedCol -
+                selectedCol % BOX_COLS;
+
+        for (int r = startRow;
+             r < startRow + BOX_ROWS;
+             r++) {
+
+            for (int c = startCol;
+                 c < startCol + BOX_COLS;
+                 c++) {
+
+                cells[r][c].setBackground(
+                        new Color(235, 245, 255)
+                );
+            }
+        }
+
+        cells[selectedRow][selectedCol]
+                .setBackground(
+                        new Color(255, 245, 180)
+                );
+    }
+
+    // ============================================================
+    // GENERATE NEW PUZZLE
+    // ============================================================
 
     private void generateNewPuzzle() {
-        if (busy) return;
 
-        busy = true;
-        statusLabel.setText("Generating unique puzzle...");
+        if (gameBusy) {
+            return;
+        }
 
-        SwingWorker<int[][], Void> worker = new SwingWorker<>() {
-            @Override
-            protected int[][] doInBackground() {
-                int[][] generated = new int[SIZE][SIZE];
-                generateFullSolution(generated);
+        gameBusy = true;
 
-                int[][] puzzle = copyBoard(generated);
-                int targetRemoved = getRemovalCount();
-                createUniquePuzzle(puzzle, targetRemoved);
+        setControlsEnabled(false);
 
-                return puzzle;
-            }
+        stopGameTimer();
 
-            @Override
-            protected void done() {
-                try {
-                    int[][] puzzle = get();
+        mistakes = 0;
+        hints = 0;
+        finalElapsedTime = 0;
 
-                    int[][] solved = copyBoard(puzzle);
-                    if (!solveWithMRV(solved)) {
-                        throw new IllegalStateException("Generated puzzle could not be solved.");
+        updateGameInformation();
+
+        statusLabel.setText(
+                "Generating " + SIZE + "×" + SIZE + " puzzle..."
+        );
+
+        SwingWorker<int[][], Void> worker =
+                new SwingWorker<int[][], Void>() {
+
+                    private int[][] generatedSolution;
+                    private int[][] generatedPuzzle;
+
+                    @Override
+                    protected int[][] doInBackground()
+                            throws Exception {
+
+                        generatedSolution =
+                                generateCompleteSolution();
+
+                        generatedPuzzle =
+                                createUniquePuzzle(
+                                        generatedSolution
+                                );
+
+                        return generatedPuzzle;
                     }
-                    copyInto(solution, solved);
 
-                    copyInto(originalPuzzle, puzzle);
-                    displayPuzzle(puzzle);
+                    @Override
+                    protected void done() {
 
-                    mistakes = 0;
-                    hintsUsed = 0;
-                    updateStats();
-                    startGameTimer();
+                        try {
 
-                    statusLabel.setText("New puzzle ready");
-                } catch (Exception ex) {
-                    statusLabel.setText("Generation failed");
-                    JOptionPane.showMessageDialog(
-                    		SudokuSolver.this,
-                            "Could not generate the puzzle.\n" + ex.getMessage(),
-                            "Generation Error",
-                            JOptionPane.ERROR_MESSAGE);
-                } finally {
-                    busy = false;
-                }
-            }
-        };
+                            int[][] puzzle = get();
+
+                            originalPuzzle =
+                                    copyBoard(puzzle);
+
+                            solution =
+                                    copyBoard(
+                                            generatedSolution
+                                    );
+
+                            displayPuzzle();
+
+                            gameBusy = false;
+
+                            setControlsEnabled(true);
+
+                            statusLabel.setText(
+                                    "New puzzle generated."
+                            );
+
+                            startGameTimer();
+
+                            updateGameInformation();
+
+                        } catch (Exception ex) {
+
+                            gameBusy = false;
+
+                            setControlsEnabled(true);
+
+                            statusLabel.setText(
+                                    "Puzzle generation failed."
+                            );
+
+                            JOptionPane.showMessageDialog(
+                                    SudokuSolver.this,
+                                    "Unable to generate puzzle:\n"
+                                            + ex.getMessage(),
+                                    "Generation Error",
+                                    JOptionPane.ERROR_MESSAGE
+                            );
+                        }
+                    }
+                };
 
         worker.execute();
     }
 
-    /*
-     * Creates a puzzle while preserving a single solution.
-     * The method tries random cell removals and accepts a removal only
-     * when countSolutions() reports exactly one solution.
-     */
-    private void createUniquePuzzle(int[][] puzzle, int targetRemoved) {
-        List<Integer> positions = new ArrayList<>();
-        for (int i = 0; i < SIZE * SIZE; i++) positions.add(i);
-        Collections.shuffle(positions, random);
+    // ============================================================
+    // FAST COMPLETE SOLUTION GENERATOR
+    // ============================================================
 
+    /**
+     * Generates a valid completed Sudoku using a mathematical
+     * pattern instead of random backtracking.
+     *
+     * This is much faster for 16 x 16 Sudoku.
+     */
+    private int[][] generateCompleteSolution() {
+
+        int[][] board =
+                new int[SIZE][SIZE];
+
+        List<Integer> numbers =
+                new ArrayList<>();
+
+        for (int i = 1; i <= SIZE; i++) {
+            numbers.add(i);
+        }
+
+        Collections.shuffle(numbers, random);
+
+        for (int r = 0; r < SIZE; r++) {
+
+            for (int c = 0; c < SIZE; c++) {
+
+                int index =
+                        patternIndex(r, c);
+
+                board[r][c] =
+                        numbers.get(index);
+            }
+        }
+
+        shuffleRows(board);
+        shuffleColumns(board);
+
+        return board;
+    }
+
+    // ============================================================
+    // SUDOKU PATTERN
+    // ============================================================
+
+    private int patternIndex(int row, int col) {
+
+        return (
+                row * BOX_COLS
+                        + row / BOX_ROWS
+                        + col
+        ) % SIZE;
+    }
+
+    // ============================================================
+    // SHUFFLE ROWS
+    // ============================================================
+
+    private void shuffleRows(int[][] board) {
+
+        // Shuffle rows inside each band.
+        for (int band = 0;
+             band < SIZE;
+             band += BOX_ROWS) {
+
+            List<Integer> rows =
+                    new ArrayList<>();
+
+            for (int i = 0; i < BOX_ROWS; i++) {
+                rows.add(band + i);
+            }
+
+            Collections.shuffle(rows, random);
+
+            int[][] temp =
+                    copyBoard(board);
+
+            for (int i = 0; i < BOX_ROWS; i++) {
+
+                board[band + i] =
+                        temp[rows.get(i)].clone();
+            }
+        }
+
+        // Shuffle the bands.
+        List<Integer> bands =
+                new ArrayList<>();
+
+        for (int i = 0;
+             i < SIZE / BOX_ROWS;
+             i++) {
+
+            bands.add(i);
+        }
+
+        Collections.shuffle(bands, random);
+
+        int[][] temp =
+                copyBoard(board);
+
+        for (int band = 0;
+             band < bands.size();
+             band++) {
+
+            for (int r = 0;
+                 r < BOX_ROWS;
+                 r++) {
+
+                board[
+                        band * BOX_ROWS + r
+                ] =
+                        temp[
+                                bands.get(band) * BOX_ROWS + r
+                        ].clone();
+            }
+        }
+    }
+
+    // ============================================================
+    // SHUFFLE COLUMNS
+    // ============================================================
+
+    private void shuffleColumns(int[][] board) {
+
+        // Shuffle columns inside each stack.
+        for (int stack = 0;
+             stack < SIZE;
+             stack += BOX_COLS) {
+
+            List<Integer> columns =
+                    new ArrayList<>();
+
+            for (int i = 0; i < BOX_COLS; i++) {
+                columns.add(stack + i);
+            }
+
+            Collections.shuffle(
+                    columns,
+                    random
+            );
+
+            for (int r = 0; r < SIZE; r++) {
+
+                int[] old =
+                        board[r].clone();
+
+                for (int i = 0;
+                     i < BOX_COLS;
+                     i++) {
+
+                    board[r][stack + i] =
+                            old[columns.get(i)];
+                }
+            }
+        }
+
+        // Shuffle stacks.
+        List<Integer> stacks =
+                new ArrayList<>();
+
+        for (int i = 0;
+             i < SIZE / BOX_COLS;
+             i++) {
+
+            stacks.add(i);
+        }
+
+        Collections.shuffle(
+                stacks,
+                random
+        );
+
+        int[][] temp =
+                copyBoard(board);
+
+        for (int r = 0; r < SIZE; r++) {
+
+            for (int stack = 0;
+                 stack < stacks.size();
+                 stack++) {
+
+                for (int c = 0;
+                     c < BOX_COLS;
+                     c++) {
+
+                    board[r][
+                            stack * BOX_COLS + c
+                    ] =
+                            temp[r][
+                                    stacks.get(stack)
+                                            * BOX_COLS + c
+                            ];
+                }
+            }
+        }
+    }
+
+    // ============================================================
+    // CREATE UNIQUE PUZZLE
+    // ============================================================
+
+    private int[][] createUniquePuzzle(
+            int[][] completeSolution) {
+
+        int[][] puzzle =
+                copyBoard(completeSolution);
+
+        List<Integer> positions =
+                new ArrayList<>();
+
+        int total =
+                SIZE * SIZE;
+
+        for (int i = 0; i < total; i++) {
+            positions.add(i);
+        }
+
+        Collections.shuffle(
+                positions,
+                random
+        );
+
+        int targetRemovals =
+                getRemovalCount();
+
+        /*
+         * 16 x 16 uniqueness checking is expensive.
+         * The removal count is therefore kept within a safer
+         * range while still producing a challenging puzzle.
+         */
         int removed = 0;
 
+        int maxAttempts =
+                targetRemovals * 2;
+
+        int attempts = 0;
+
         for (int position : positions) {
-            if (removed >= targetRemoved) break;
 
-            int r = position / SIZE;
-            int c = position % SIZE;
+            if (removed >= targetRemovals) {
+                break;
+            }
 
-            int backup = puzzle[r][c];
-            puzzle[r][c] = EMPTY;
+            if (attempts >= maxAttempts) {
+                break;
+            }
 
-            int[][] test = copyBoard(puzzle);
-            if (countSolutions(test, 2) == 1) {
+            attempts++;
+
+            int row =
+                    position / SIZE;
+
+            int col =
+                    position % SIZE;
+
+            int backup =
+                    puzzle[row][col];
+
+            puzzle[row][col] = 0;
+
+            int solutions =
+                    countSolutions(
+                            puzzle,
+                            2
+                    );
+
+            if (solutions == 1) {
+
                 removed++;
+
             } else {
-                puzzle[r][c] = backup;
+
+                puzzle[row][col] =
+                        backup;
             }
         }
+
+        return puzzle;
     }
+
+    // ============================================================
+    // REMOVAL COUNT
+    // ============================================================
 
     private int getRemovalCount() {
-        String difficulty = (String) difficultyBox.getSelectedItem();
-        if ("Easy".equals(difficulty)) return 35;
-        if ("Medium".equals(difficulty)) return 45;
-        return 52;
-    }
 
-    private boolean generateFullSolution(int[][] board) {
+        String difficulty =
+                difficultyBox
+                        .getSelectedItem()
+                        .toString();
 
-        int[] empty = findEmptyCellFirst(board);
+        int removals;
 
-        // No empty cells means the board is completely solved
-        if (empty == null) {
-            return true;
-        }
+        if (SIZE == 6) {
 
-        int row = empty[0];
-        int col = empty[1];
-
-        int[] numbers = shuffledNumbers();
-
-        for (int num : numbers) {
-
-            if (isSafe(board, row, col, num)) {
-
-                board[row][col] = num;
-
-                // Recursively try to solve the remaining cells
-                if (generateFullSolution(board)) {
-                    return true;
-                }
-
-                // Backtrack
-                board[row][col] = 0;
-            }
-        }
-
-        // No number worked for this cell
-        return false;
-    }
-
-    private int[] shuffledNumbers() {
-        int[] numbers = {1,2,3,4,5,6,7,8,9};
-        for (int i = numbers.length - 1; i > 0; i--) {
-            int j = random.nextInt(i + 1);
-            int t = numbers[i];
-            numbers[i] = numbers[j];
-            numbers[j] = t;
-        }
-        return numbers;
-    }
-
-    /*
-     * Counts solutions, stopping at 'limit'.
-     * This is used to verify uniqueness without exploring the entire
-     * solution space after two solutions have been found.
-     */
-    private int countSolutions(int[][] board, int limit) {
-        if (limit <= 0) return 0;
-
-        int[] cell = findBestCell(board);
-        if (cell == null) return 1;
-
-        int row = cell[0];
-        int col = cell[1];
-        int count = 0;
-
-        for (int num : candidates(board, row, col)) {
-            board[row][col] = num;
-            count += countSolutions(board, limit - count);
-            board[row][col] = EMPTY;
-
-            if (count >= limit) return count;
-        }
-
-        return count;
-    }
-
-    // -------------------- MRV + CONSTRAINT PROPAGATION --------------------
-
-    private boolean solveWithMRV(int[][] board) {
-        int[] cell = findBestCell(board);
-
-        if (cell == null) return true;
-
-        int row = cell[0];
-        int col = cell[1];
-
-        List<Integer> possible = candidates(board, row, col);
-
-        for (int num : possible) {
-            board[row][col] = num;
-
-            if (solveWithMRV(board)) return true;
-
-            board[row][col] = EMPTY;
-        }
-
-        return false;
-    }
-
-    /*
-     * MRV: select the empty cell having the fewest legal candidates.
-     * This is a heuristic that reduces branching compared with selecting
-     * the first empty cell.
-     */
-    private int[] findBestCell(int[][] board) {
-        int bestRow = -1;
-        int bestCol = -1;
-        int bestCount = Integer.MAX_VALUE;
-
-        for (int r = 0; r < SIZE; r++) {
-            for (int c = 0; c < SIZE; c++) {
-                if (board[r][c] == EMPTY) {
-                    int count = candidates(board, r, c).size();
-
-                    if (count < bestCount) {
-                        bestCount = count;
-                        bestRow = r;
-                        bestCol = c;
-
-                        if (bestCount == 1) {
-                            return new int[]{bestRow, bestCol};
-                        }
-                    }
-                }
-            }
-        }
-
-        return bestRow == -1 ? null : new int[]{bestRow, bestCol};
-    }
-
-    /*
-     * Constraint propagation is implemented through candidate-set
-     * calculation: row, column and box values are excluded before a
-     * candidate is considered by the recursive search.
-     */
-    private List<Integer> candidates(int[][] board, int row, int col) {
-        boolean[] used = new boolean[SIZE + 1];
-
-        for (int c = 0; c < SIZE; c++) {
-            int v = board[row][c];
-            if (v != EMPTY) used[v] = true;
-        }
-
-        for (int r = 0; r < SIZE; r++) {
-            int v = board[r][col];
-            if (v != EMPTY) used[v] = true;
-        }
-
-        int startRow = row - row % BOX;
-        int startCol = col - col % BOX;
-
-        for (int r = startRow; r < startRow + BOX; r++) {
-            for (int c = startCol; c < startCol + BOX; c++) {
-                int v = board[r][c];
-                if (v != EMPTY) used[v] = true;
-            }
-        }
-
-        List<Integer> result = new ArrayList<>();
-        for (int n = 1; n <= 9; n++) {
-            if (!used[n]) result.add(n);
-        }
-
-        Collections.shuffle(result, random);
-        return result;
-    }
-
-    private boolean isSafe(int[][] board, int row, int col, int num) {
-        for (int c = 0; c < SIZE; c++) {
-            if (board[row][c] == num) return false;
-        }
-
-        for (int r = 0; r < SIZE; r++) {
-            if (board[r][col] == num) return false;
-        }
-
-        int startRow = row - row % BOX;
-        int startCol = col - col % BOX;
-
-        for (int r = startRow; r < startRow + BOX; r++) {
-            for (int c = startCol; c < startCol + BOX; c++) {
-                if (board[r][c] == num) return false;
-            }
-        }
-
-        return true;
-    }
-
-    // -------------------- SOLVE / ANIMATION --------------------
-
-    private void solveInstant() {
-        if (busy) return;
-
-        int[][] grid = getGridFromUI();
-        if (grid == null) return;
-
-        if (!isInitialBoardValid(grid)) {
-            showError("Invalid Sudoku. Duplicate numbers were found.");
-            return;
-        }
-
-        busy = true;
-        statusLabel.setText("Solving with MRV + backtracking...");
-
-        SwingWorker<int[][], Void> worker = new SwingWorker<>() {
-            @Override
-            protected int[][] doInBackground() {
-                int[][] work = copyBoard(grid);
-                return solveWithMRV(work) ? work : null;
-            }
-
-            @Override
-            protected void done() {
-                try {
-                    int[][] solved = get();
-
-                    if (solved == null) {
-                        showError("No solution exists for the current board.");
-                        return;
-                    }
-
-                    displaySolvedGrid(solved);
-                    copyInto(solution, solved);
-                    statusLabel.setText("Solved successfully");
-                    gameRunning = false;
-                    gameTimer.stop();
-                    updateScore();
-
-                    JOptionPane.showMessageDialog(
-                    		SudokuSolver.this,
-                            "Sudoku solved using MRV + backtracking!",
-                            "Solved",
-                            JOptionPane.INFORMATION_MESSAGE);
-                } catch (Exception ex) {
-                    showError("Solver error: " + ex.getMessage());
-                } finally {
-                    busy = false;
-                }
-            }
-        };
-
-        worker.execute();
-    }
-
-    private void animateSolve() {
-        if (busy) return;
-
-        int[][] grid = getGridFromUI();
-        if (grid == null) return;
-
-        if (!isInitialBoardValid(grid)) {
-            showError("Invalid Sudoku. Fix duplicate values first.");
-            return;
-        }
-
-        busy = true;
-        statusLabel.setText("Animating backtracking...");
-
-        List<SolveStep> steps = new ArrayList<>();
-        int[][] work = copyBoard(grid);
-
-        if (!collectSolveSteps(work, steps)) {
-            busy = false;
-            showError("No solution exists for the current board.");
-            return;
-        }
-
-        animateSteps(steps, 0);
-    }
-
-    private boolean collectSolveSteps(int[][] board, List<SolveStep> steps) {
-        int[] cell = findBestCell(board);
-        if (cell == null) return true;
-
-        int row = cell[0];
-        int col = cell[1];
-
-        for (int num : candidates(board, row, col)) {
-            board[row][col] = num;
-            steps.add(new SolveStep(row, col, num, false));
-
-            if (collectSolveSteps(board, steps)) return true;
-
-            board[row][col] = EMPTY;
-            steps.add(new SolveStep(row, col, EMPTY, true));
-        }
-
-        return false;
-    }
-
-    private void animateSteps(List<SolveStep> steps, int index) {
-        if (index >= steps.size()) {
-            busy = false;
-            statusLabel.setText("Animation complete");
-            gameRunning = false;
-            gameTimer.stop();
-            return;
-        }
-
-        SolveStep step = steps.get(index);
-        JTextField cell = cells[step.row][step.col];
-
-        if (step.backtrack) {
-            cell.setText("");
-        } else {
-            cell.setText(String.valueOf(step.value));
-        }
-
-        cell.setForeground(step.backtrack ? Color.RED : new Color(0, 100, 200));
-
-        Timer delay = new Timer(25, e -> {
-            ((Timer)e.getSource()).stop();
-            animateSteps(steps, index + 1);
-        });
-        delay.setRepeats(false);
-        delay.start();
-    }
-
-    private static class SolveStep {
-        int row, col, value;
-        boolean backtrack;
-
-        SolveStep(int row, int col, int value, boolean backtrack) {
-            this.row = row;
-            this.col = col;
-            this.value = value;
-            this.backtrack = backtrack;
-        }
-    }
-
-    // -------------------- HINT / VALIDATION --------------------
-
-    private void giveHint() {
-        if (busy) return;
-
-        int[][] grid = getGridFromUI();
-        if (grid == null) return;
-
-        if (!isInitialBoardValid(grid)) {
-            showError("Fix duplicate values before using a hint.");
-            return;
-        }
-
-        int[][] solved = copyBoard(grid);
-        if (!solveWithMRV(solved)) {
-            showError("No solution exists for the current board.");
-            return;
-        }
-
-        List<int[]> emptyCells = new ArrayList<>();
-
-        for (int r = 0; r < SIZE; r++) {
-            for (int c = 0; c < SIZE; c++) {
-                if (grid[r][c] == EMPTY) {
-                    emptyCells.add(new int[]{r, c});
-                }
-            }
-        }
-
-        if (emptyCells.isEmpty()) {
-            JOptionPane.showMessageDialog(
-                    this, "There are no empty cells.", "Hint",
-                    JOptionPane.INFORMATION_MESSAGE);
-            return;
-        }
-
-        int[] chosen = emptyCells.get(random.nextInt(emptyCells.size()));
-        int r = chosen[0];
-        int c = chosen[1];
-
-        cells[r][c].setText(String.valueOf(solved[r][c]));
-        cells[r][c].setForeground(new Color(0, 130, 70));
-
-        hintsUsed++;
-        updateScore();
-        statusLabel.setText("Hint used at row " + (r + 1) + ", column " + (c + 1));
-    }
-
-    private void validateSudoku() {
-        if (busy) return;
-
-        int[][] grid = getGridFromUI();
-        if (grid == null) return;
-
-        if (!isInitialBoardValid(grid)) {
-            mistakes++;
-            updateStats();
-            showError("Invalid Sudoku. Duplicate values found.");
-            return;
-        }
-
-        boolean complete = true;
-        for (int[] row : grid) {
-            for (int value : row) {
-                if (value == EMPTY) {
-                    complete = false;
-                    break;
-                }
-            }
-        }
-
-        if (complete) {
-            if (boardsEqual(grid, solution)) {
-                gameRunning = false;
-                gameTimer.stop();
-                updateScore();
-                JOptionPane.showMessageDialog(
-                        this,
-                        "Congratulations! Puzzle completed correctly.",
-                        "Success",
-                        JOptionPane.INFORMATION_MESSAGE);
-                statusLabel.setText("Completed!");
+            if (difficulty.equals("Easy")) {
+                removals = 12;
+            } else if (difficulty.equals("Medium")) {
+                removals = 18;
             } else {
-                mistakes++;
-                updateStats();
-                showError("The board is full but the solution is incorrect.");
+                removals = 22;
             }
+
+        } else if (SIZE == 9) {
+
+            if (difficulty.equals("Easy")) {
+                removals = 35;
+            } else if (difficulty.equals("Medium")) {
+                removals = 45;
+            } else {
+                removals = 52;
+            }
+
         } else {
-            JOptionPane.showMessageDialog(
-                    this,
-                    "The entered Sudoku is valid so far.",
-                    "Valid",
-                    JOptionPane.INFORMATION_MESSAGE);
-            statusLabel.setText("No conflicts found");
-        }
-    }
 
-    private boolean isInitialBoardValid(int[][] grid) {
-        for (int r = 0; r < SIZE; r++) {
-            for (int c = 0; c < SIZE; c++) {
-                int num = grid[r][c];
-                if (num == EMPTY) continue;
-
-                grid[r][c] = EMPTY;
-                boolean safe = isSafe(grid, r, c, num);
-                grid[r][c] = num;
-
-                if (!safe) return false;
+            /*
+             * Safer values for 16 x 16.
+             * Very aggressive removal makes uniqueness testing
+             * extremely expensive.
+             */
+            if (difficulty.equals("Easy")) {
+                removals = 90;
+            } else if (difficulty.equals("Medium")) {
+                removals = 120;
+            } else {
+                removals = 150;
             }
         }
-        return true;
+
+        // Always leave at least SIZE clues.
+        removals =
+                Math.min(
+                        removals,
+                        SIZE * SIZE - SIZE
+                );
+
+        return removals;
     }
 
-    private void checkUserMove(int row, int col, int value) {
-        if (originalPuzzle[row][col] != EMPTY) return;
+    // ============================================================
+    // COUNT SOLUTIONS
+    // ============================================================
 
-        int[][] grid = getGridFromUI();
-        if (grid == null) return;
+    private int countSolutions(
+            int[][] board,
+            int limit) {
 
-        grid[row][col] = EMPTY;
+        int[] result = {0};
 
-        if (!isSafe(grid, row, col, value)) {
-            mistakes++;
-            cells[row][col].setBackground(new Color(255, 210, 210));
-            updateStats();
+        countSolutionsRecursive(
+                board,
+                result,
+                limit
+        );
 
-            Timer t = new Timer(400, e -> {
-                cells[row][col].setBackground(Color.WHITE);
-                ((Timer)e.getSource()).stop();
-            });
-            t.setRepeats(false);
-            t.start();
-        } else {
-            cells[row][col].setBackground(Color.WHITE);
+        return result[0];
+    }
+
+    private void countSolutionsRecursive(
+            int[][] board,
+            int[] result,
+            int limit) {
+
+        if (result[0] >= limit) {
+            return;
         }
 
-        updateScore();
+        int[] cell =
+                findBestEmptyCell(board);
+
+        if (cell == null) {
+
+            result[0]++;
+            return;
+        }
+
+        int row = cell[0];
+        int col = cell[1];
+
+        List<Integer> candidates =
+                getCandidates(
+                        board,
+                        row,
+                        col
+                );
+
+        for (int value : candidates) {
+
+            board[row][col] =
+                    value;
+
+            countSolutionsRecursive(
+                    board,
+                    result,
+                    limit
+            );
+
+            board[row][col] = 0;
+
+            if (result[0] >= limit) {
+                return;
+            }
+        }
     }
 
-    // -------------------- BOARD / UI OPERATIONS --------------------
+    // ============================================================
+    // DISPLAY PUZZLE
+    // ============================================================
 
-    private int[][] getGridFromUI() {
-        int[][] grid = new int[SIZE][SIZE];
+    private void displayPuzzle() {
+
+        if (cells == null) {
+            return;
+        }
 
         for (int r = 0; r < SIZE; r++) {
-            for (int c = 0; c < SIZE; c++) {
-                String text = cells[r][c].getText().trim();
 
-                if (text.isEmpty()) {
-                    grid[r][c] = EMPTY;
+            for (int c = 0; c < SIZE; c++) {
+
+                JTextField cell =
+                        cells[r][c];
+
+                int value =
+                        originalPuzzle[r][c];
+
+                if (value == 0) {
+
+                    cell.setText("");
+
+                    cell.setEditable(true);
+
+                    cell.setBackground(
+                            Color.WHITE
+                    );
+
                 } else {
-                    try {
-                        int value = Integer.parseInt(text);
-                        if (value < 1 || value > 9) {
-                            showError("Only numbers 1–9 are allowed.");
-                            return null;
-                        }
-                        grid[r][c] = value;
-                    } catch (NumberFormatException ex) {
-                        showError("Only numbers 1–9 are allowed.");
-                        return null;
+
+                    cell.setText(
+                            valueToSymbol(value)
+                    );
+
+                    cell.setEditable(false);
+
+                    cell.setBackground(
+                            new Color(235, 235, 235)
+                    );
+                }
+            }
+        }
+
+        boardPanel.revalidate();
+        boardPanel.repaint();
+    }
+
+    // ============================================================
+    // READ BOARD
+    // ============================================================
+
+    private int[][] readBoard() {
+
+        int[][] board =
+                new int[SIZE][SIZE];
+
+        if (cells == null) {
+            return board;
+        }
+
+        for (int r = 0; r < SIZE; r++) {
+
+            for (int c = 0; c < SIZE; c++) {
+
+                String text =
+                        cells[r][c]
+                                .getText()
+                                .trim()
+                                .toUpperCase();
+
+                if (!text.isEmpty()) {
+
+                    int value =
+                            symbolToValue(text);
+
+                    if (value >= 1 &&
+                            value <= SIZE) {
+
+                        board[r][c] =
+                                value;
                     }
-                }
-            }
-        }
-
-        return grid;
-    }
-
-    private void displayPuzzle(int[][] puzzle) {
-        for (int r = 0; r < SIZE; r++) {
-            for (int c = 0; c < SIZE; c++) {
-                int value = puzzle[r][c];
-
-                if (value == EMPTY) {
-                    cells[r][c].setText("");
-                    cells[r][c].setEditable(true);
-                    cells[r][c].setForeground(Color.BLUE);
-                    cells[r][c].setBackground(Color.WHITE);
-                } else {
-                    cells[r][c].setText(String.valueOf(value));
-                    cells[r][c].setEditable(false);
-                    cells[r][c].setForeground(Color.BLACK);
-                    cells[r][c].setBackground(new Color(225, 225, 225));
-                }
-            }
-        }
-    }
-
-    private void displaySolvedGrid(int[][] board) {
-        for (int r = 0; r < SIZE; r++) {
-            for (int c = 0; c < SIZE; c++) {
-                cells[r][c].setText(String.valueOf(board[r][c]));
-                cells[r][c].setEditable(false);
-
-                if (originalPuzzle[r][c] == EMPTY) {
-                    cells[r][c].setForeground(new Color(0, 100, 200));
-                } else {
-                    cells[r][c].setForeground(Color.BLACK);
-                }
-            }
-        }
-    }
-
-    private void clearUserCells() {
-        if (busy) return;
-
-        for (int r = 0; r < SIZE; r++) {
-            for (int c = 0; c < SIZE; c++) {
-                if (originalPuzzle[r][c] == EMPTY) {
-                    cells[r][c].setText("");
-                    cells[r][c].setEditable(true);
-                    cells[r][c].setForeground(Color.BLUE);
-                    cells[r][c].setBackground(Color.WHITE);
-                }
-            }
-        }
-
-        statusLabel.setText("User entries cleared");
-    }
-
-    private void resetPuzzle() {
-        if (busy) return;
-
-        displayPuzzle(originalPuzzle);
-        mistakes = 0;
-        hintsUsed = 0;
-        updateStats();
-        startGameTimer();
-        statusLabel.setText("Puzzle reset");
-    }
-
-    // -------------------- SAVE / LOAD --------------------
-
-    private void savePuzzle() {
-        if (busy) return;
-
-        JFileChooser chooser = new JFileChooser();
-        chooser.setDialogTitle("Save Sudoku Puzzle");
-
-        if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
-
-        File file = chooser.getSelectedFile();
-
-        try (PrintWriter out = new PrintWriter(new FileWriter(file))) {
-            out.println("ADVANCED_SUDOKU_V2");
-            out.println(difficultyBox.getSelectedItem());
-            out.println(mistakes);
-            out.println(hintsUsed);
-            out.println(System.currentTimeMillis() - startTime);
-
-            int[][] grid = getGridFromUI();
-            if (grid == null) return;
-
-            for (int r = 0; r < SIZE; r++) {
-                for (int c = 0; c < SIZE; c++) {
-                    out.print(grid[r][c]);
-                    if (c < SIZE - 1) out.print(" ");
-                }
-                out.println();
-            }
-
-            out.println("ORIGINAL");
-            for (int r = 0; r < SIZE; r++) {
-                for (int c = 0; c < SIZE; c++) {
-                    out.print(originalPuzzle[r][c]);
-                    if (c < SIZE - 1) out.print(" ");
-                }
-                out.println();
-            }
-
-            out.println("SOLUTION");
-            for (int r = 0; r < SIZE; r++) {
-                for (int c = 0; c < SIZE; c++) {
-                    out.print(solution[r][c]);
-                    if (c < SIZE - 1) out.print(" ");
-                }
-                out.println();
-            }
-
-            statusLabel.setText("Puzzle saved");
-        } catch (IOException ex) {
-            showError("Could not save puzzle: " + ex.getMessage());
-        }
-    }
-
-    private void loadPuzzle() {
-        if (busy) return;
-
-        JFileChooser chooser = new JFileChooser();
-        chooser.setDialogTitle("Load Sudoku Puzzle");
-
-        if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
-
-        File file = chooser.getSelectedFile();
-
-        try (BufferedReader in = new BufferedReader(new FileReader(file))) {
-            if (!"ADVANCED_SUDOKU_V2".equals(in.readLine())) {
-                throw new IOException("Unsupported puzzle file.");
-            }
-
-            String difficulty = in.readLine();
-            mistakes = Integer.parseInt(in.readLine());
-            hintsUsed = Integer.parseInt(in.readLine());
-            long elapsed = Long.parseLong(in.readLine());
-
-            int[][] grid = readBoard(in);
-            String marker = in.readLine();
-            if (!"ORIGINAL".equals(marker)) throw new IOException("Missing ORIGINAL section.");
-
-            int[][] original = readBoard(in);
-            marker = in.readLine();
-            if (!"SOLUTION".equals(marker)) throw new IOException("Missing SOLUTION section.");
-
-            int[][] loadedSolution = readBoard(in);
-
-            difficultyBox.setSelectedItem(difficulty);
-            copyInto(originalPuzzle, original);
-            copyInto(solution, loadedSolution);
-            displayPuzzle(grid);
-
-            startTime = System.currentTimeMillis() - elapsed;
-            gameRunning = true;
-            gameTimer.start();
-            updateStats();
-
-            statusLabel.setText("Puzzle loaded");
-        } catch (Exception ex) {
-            showError("Could not load puzzle: " + ex.getMessage());
-        }
-    }
-
-    private int[][] readBoard(BufferedReader in) throws IOException {
-        int[][] board = new int[SIZE][SIZE];
-
-        for (int r = 0; r < SIZE; r++) {
-            String line = in.readLine();
-            if (line == null) throw new IOException("Unexpected end of file.");
-
-            String[] parts = line.trim().split("\\s+");
-            if (parts.length != SIZE) throw new IOException("Invalid board row.");
-
-            for (int c = 0; c < SIZE; c++) {
-                board[r][c] = Integer.parseInt(parts[c]);
-                if (board[r][c] < 0 || board[r][c] > 9) {
-                    throw new IOException("Invalid cell value.");
                 }
             }
         }
@@ -978,94 +1272,1846 @@ public class SudokuSolver extends JFrame {
         return board;
     }
 
-    // -------------------- TIMER / SCORE --------------------
+    // ============================================================
+    // SYMBOL CONVERSION
+    // ============================================================
 
-    private void startGameTimer() {
-        startTime = System.currentTimeMillis();
-        gameRunning = true;
-        gameTimer.start();
-        updateTimer();
-    }
+    private String valueToSymbol(int value) {
 
-    private void updateTimer() {
-        if (!gameRunning) return;
+        if (value >= 1 &&
+                value <= 9) {
 
-        long elapsed = (System.currentTimeMillis() - startTime) / 1000;
-        long minutes = elapsed / 60;
-        long seconds = elapsed % 60;
+            return String.valueOf(value);
+        }
 
-        timerLabel.setText(String.format("Time: %02d:%02d", minutes, seconds));
-        updateScore();
-    }
-
-    private void updateStats() {
-        mistakesLabel.setText("Mistakes: " + mistakes);
-        updateScore();
-    }
-
-    private void updateScore() {
-        long elapsed = gameRunning
-                ? (System.currentTimeMillis() - startTime) / 1000
-                : 0;
-
-        int difficultyBonus = switch ((String) difficultyBox.getSelectedItem()) {
-            case "Easy" -> 100;
-            case "Medium" -> 200;
-            default -> 300;
-        };
-
-        int score = Math.max(
-                0,
-                difficultyBonus
-                        - mistakes * 20
-                        - hintsUsed * 15
-                        - (int)(elapsed / 10)
+        return String.valueOf(
+                (char) ('A' + value - 10)
         );
-
-        scoreLabel.setText("Score: " + score);
     }
 
-    // -------------------- UTILITY --------------------
+    private int symbolToValue(
+            String symbol) {
 
-    private int[] findEmptyCellFirst(int[][] board) {
-        for (int r = 0; r < SIZE; r++) {
-            for (int c = 0; c < SIZE; c++) {
-                if (board[r][c] == EMPTY) return new int[]{r, c};
+        if (symbol == null ||
+                symbol.isEmpty()) {
+
+            return 0;
+        }
+
+        char ch =
+                Character.toUpperCase(
+                        symbol.charAt(0)
+                );
+
+        if (ch >= '1' &&
+                ch <= '9') {
+
+            return ch - '0';
+        }
+
+        if (ch >= 'A' &&
+                ch <= 'G') {
+
+            return ch - 'A' + 10;
+        }
+
+        return -1;
+    }
+
+    private boolean isValidSymbol(
+            String symbol) {
+
+        int value =
+                symbolToValue(symbol);
+
+        return value >= 1 &&
+                value <= SIZE;
+    }
+
+    // ============================================================
+    // IS SAFE
+    // ============================================================
+
+    private boolean isSafe(
+            int[][] board,
+            int row,
+            int col,
+            int value) {
+
+        // Row
+        for (int c = 0; c < SIZE; c++) {
+
+            if (c != col &&
+                    board[row][c] == value) {
+
+                return false;
             }
         }
-        return null;
-    }
 
-    private int[][] copyBoard(int[][] source) {
-        int[][] copy = new int[SIZE][SIZE];
+        // Column
         for (int r = 0; r < SIZE; r++) {
-            System.arraycopy(source[r], 0, copy[r], 0, SIZE);
-        }
-        return copy;
-    }
 
-    private void copyInto(int[][] target, int[][] source) {
-        for (int r = 0; r < SIZE; r++) {
-            System.arraycopy(source[r], 0, target[r], 0, SIZE);
-        }
-    }
+            if (r != row &&
+                    board[r][col] == value) {
 
-    private boolean boardsEqual(int[][] a, int[][] b) {
-        for (int r = 0; r < SIZE; r++) {
-            if (!Arrays.equals(a[r], b[r])) return false;
+                return false;
+            }
         }
+
+        // Box
+        int startRow =
+                row -
+                row % BOX_ROWS;
+
+        int startCol =
+                col -
+                col % BOX_COLS;
+
+        for (int r = startRow;
+             r < startRow + BOX_ROWS;
+             r++) {
+
+            for (int c = startCol;
+                 c < startCol + BOX_COLS;
+                 c++) {
+
+                if ((r != row ||
+                        c != col) &&
+                        board[r][c] == value) {
+
+                    return false;
+                }
+            }
+        }
+
         return true;
     }
 
-    private void showError(String message) {
-        JOptionPane.showMessageDialog(
-                this, message, "Sudoku", JOptionPane.ERROR_MESSAGE);
+    // ============================================================
+    // CANDIDATES
+    // ============================================================
+
+    private List<Integer> getCandidates(
+            int[][] board,
+            int row,
+            int col) {
+
+        List<Integer> candidates =
+                new ArrayList<>();
+
+        for (int value = 1;
+             value <= SIZE;
+             value++) {
+
+            if (isSafe(
+                    board,
+                    row,
+                    col,
+                    value)) {
+
+                candidates.add(value);
+            }
+        }
+
+        Collections.shuffle(
+                candidates,
+                random
+        );
+
+        return candidates;
     }
 
-    public static void main(String[] args) {
-        SwingUtilities.invokeLater(() -> {
-            SudokuSolver app = new SudokuSolver();
-            app.setVisible(true);
-        });
+    // ============================================================
+    // MRV
+    // ============================================================
+
+    private int[] findBestEmptyCell(
+            int[][] board) {
+
+        int bestRow = -1;
+        int bestCol = -1;
+
+        int bestCount =
+                Integer.MAX_VALUE;
+
+        for (int r = 0; r < SIZE; r++) {
+
+            for (int c = 0; c < SIZE; c++) {
+
+                if (board[r][c] == 0) {
+
+                    int count =
+                            getCandidates(
+                                    board,
+                                    r,
+                                    c
+                            ).size();
+
+                    if (count < bestCount) {
+
+                        bestCount = count;
+
+                        bestRow = r;
+                        bestCol = c;
+
+                        if (count == 1) {
+
+                            return new int[] {
+                                    bestRow,
+                                    bestCol
+                            };
+                        }
+                    }
+                }
+            }
+        }
+
+        if (bestRow == -1) {
+            return null;
+        }
+
+        return new int[] {
+                bestRow,
+                bestCol
+        };
+    }
+
+    // ============================================================
+    // MRV SOLVER
+    // ============================================================
+
+    private boolean solveWithMRV(
+            int[][] board) {
+
+        int[] cell =
+                findBestEmptyCell(board);
+
+        if (cell == null) {
+            return true;
+        }
+
+        int row = cell[0];
+        int col = cell[1];
+
+        List<Integer> candidates =
+                getCandidates(
+                        board,
+                        row,
+                        col
+                );
+
+        for (int value : candidates) {
+
+            board[row][col] =
+                    value;
+
+            if (solveWithMRV(board)) {
+                return true;
+            }
+
+            board[row][col] = 0;
+        }
+
+        return false;
+    }
+
+    // ============================================================
+    // SOLVE INSTANTLY
+    // ============================================================
+
+    private void solveInstant() {
+
+        if (gameBusy) {
+            return;
+        }
+
+        int[][] board =
+                readBoard();
+
+        if (!isValidBoard(board)) {
+
+            JOptionPane.showMessageDialog(
+                    this,
+                    "The current Sudoku contains conflicts.",
+                    "Cannot Solve",
+                    JOptionPane.WARNING_MESSAGE
+            );
+
+            return;
+        }
+
+        boolean solved =
+                solveWithMRV(board);
+
+        if (!solved) {
+
+            JOptionPane.showMessageDialog(
+                    this,
+                    "No solution exists for the current entries.",
+                    "No Solution",
+                    JOptionPane.WARNING_MESSAGE
+            );
+
+            return;
+        }
+
+        for (int r = 0; r < SIZE; r++) {
+
+            for (int c = 0; c < SIZE; c++) {
+
+                cells[r][c].setText(
+                        valueToSymbol(
+                                board[r][c]
+                        )
+                );
+
+                cells[r][c].setBackground(
+                        new Color(225, 245, 225)
+                );
+            }
+        }
+
+        statusLabel.setText(
+                "Sudoku solved."
+        );
+
+        finishGame();
+    }
+
+    // ============================================================
+    // ANIMATED SOLVE
+    // ============================================================
+
+    private void animateSolve() {
+
+        if (gameBusy) {
+            return;
+        }
+
+        int[][] board =
+                readBoard();
+
+        if (!isValidBoard(board)) {
+
+            JOptionPane.showMessageDialog(
+                    this,
+                    "The current Sudoku contains conflicts.",
+                    "Cannot Solve",
+                    JOptionPane.WARNING_MESSAGE
+            );
+
+            return;
+        }
+
+        gameBusy = true;
+
+        setControlsEnabled(false);
+
+        stopGameTimer();
+
+        statusLabel.setText(
+                "Preparing animation..."
+        );
+
+        SwingWorker<List<SolveStep>, Void> worker =
+                new SwingWorker<List<SolveStep>, Void>() {
+
+                    @Override
+                    protected List<SolveStep> doInBackground() {
+
+                        List<SolveStep> steps =
+                                new ArrayList<>();
+
+                        solveWithSteps(
+                                board,
+                                steps
+                        );
+
+                        return steps;
+                    }
+
+                    @Override
+                    protected void done() {
+
+                        try {
+
+                            List<SolveStep> steps =
+                                    get();
+
+                            animateSteps(
+                                    steps
+                            );
+
+                        } catch (Exception ex) {
+
+                            gameBusy = false;
+
+                            setControlsEnabled(true);
+
+                            statusLabel.setText(
+                                    "Animation failed."
+                            );
+                        }
+                    }
+                };
+
+        worker.execute();
+    }
+
+    // ============================================================
+    // SOLVE STEPS
+    // ============================================================
+
+    private boolean solveWithSteps(
+            int[][] board,
+            List<SolveStep> steps) {
+
+        int[] cell =
+                findBestEmptyCell(board);
+
+        if (cell == null) {
+            return true;
+        }
+
+        int row = cell[0];
+        int col = cell[1];
+
+        List<Integer> candidates =
+                getCandidates(
+                        board,
+                        row,
+                        col
+                );
+
+        for (int value : candidates) {
+
+            board[row][col] =
+                    value;
+
+            steps.add(
+                    new SolveStep(
+                            row,
+                            col,
+                            value
+                    )
+            );
+
+            if (solveWithSteps(
+                    board,
+                    steps)) {
+
+                return true;
+            }
+
+            board[row][col] = 0;
+
+            steps.add(
+                    new SolveStep(
+                            row,
+                            col,
+                            0
+                    )
+            );
+        }
+
+        return false;
+    }
+
+    // ============================================================
+    // ANIMATE STEPS
+    // ============================================================
+
+    private void animateSteps(
+            List<SolveStep> steps) {
+
+        if (steps.isEmpty()) {
+
+            gameBusy = false;
+
+            setControlsEnabled(true);
+
+            return;
+        }
+
+        final int[] index = {0};
+
+        int delay;
+
+        if (SIZE == 16) {
+            delay = 5;
+        } else if (SIZE == 9) {
+            delay = 15;
+        } else {
+            delay = 30;
+        }
+
+        javax.swing.Timer animationTimer =
+                new javax.swing.Timer(
+                        delay,
+                        null
+                );
+
+        animationTimer.addActionListener(
+                e -> {
+
+                    if (index[0] >= steps.size()) {
+
+                        animationTimer.stop();
+
+                        gameBusy = false;
+
+                        setControlsEnabled(true);
+
+                        statusLabel.setText(
+                                "Animation completed."
+                        );
+
+                        finishGame();
+
+                        return;
+                    }
+
+                    SolveStep step =
+                            steps.get(index[0]++);
+
+                    if (step.value == 0) {
+
+                        cells[step.row][step.col]
+                                .setText("");
+
+                    } else {
+
+                        cells[step.row][step.col]
+                                .setText(
+                                        valueToSymbol(
+                                                step.value
+                                        )
+                                );
+                    }
+
+                    cells[step.row][step.col]
+                            .setBackground(
+                                    new Color(
+                                            225,
+                                            240,
+                                            255
+                                    )
+                            );
+                }
+        );
+
+        animationTimer.start();
+    }
+
+    // ============================================================
+    // SOLVE STEP CLASS
+    // ============================================================
+
+    private static class SolveStep {
+
+        int row;
+        int col;
+        int value;
+
+        SolveStep(
+                int row,
+                int col,
+                int value) {
+
+            this.row = row;
+            this.col = col;
+            this.value = value;
+        }
+    }
+
+    // ============================================================
+    // HINT
+    // ============================================================
+
+    private void giveHint() {
+
+        if (gameBusy) {
+            return;
+        }
+
+        if (solution == null) {
+
+            JOptionPane.showMessageDialog(
+                    this,
+                    "No solution is available.",
+                    "Hint",
+                    JOptionPane.WARNING_MESSAGE
+            );
+
+            return;
+        }
+
+        int[][] board =
+                readBoard();
+
+        List<int[]> emptyCells =
+                new ArrayList<>();
+
+        for (int r = 0; r < SIZE; r++) {
+
+            for (int c = 0; c < SIZE; c++) {
+
+                if (originalPuzzle[r][c] == 0 &&
+                        board[r][c] == 0) {
+
+                    emptyCells.add(
+                            new int[] {r, c}
+                    );
+                }
+            }
+        }
+
+        if (emptyCells.isEmpty()) {
+
+            JOptionPane.showMessageDialog(
+                    this,
+                    "There are no empty cells.",
+                    "Hint",
+                    JOptionPane.INFORMATION_MESSAGE
+            );
+
+            return;
+        }
+
+        int[] selected =
+                emptyCells.get(
+                        random.nextInt(
+                                emptyCells.size()
+                        )
+                );
+
+        int row = selected[0];
+        int col = selected[1];
+
+        cells[row][col].setText(
+                valueToSymbol(
+                        solution[row][col]
+                )
+        );
+
+        cells[row][col].setBackground(
+                new Color(
+                        255,
+                        250,
+                        180
+                )
+        );
+
+        hints++;
+
+        statusLabel.setText(
+                "Hint provided."
+        );
+
+        updateGameInformation();
+
+        if (isBoardComplete(
+                readBoard())) {
+
+            finishGame();
+        }
+    }
+
+    // ============================================================
+    // VALIDATE SUDOKU
+    // ============================================================
+
+    private void validateSudoku() {
+
+        if (gameBusy) {
+            return;
+        }
+
+        int[][] board =
+                readBoard();
+
+        if (!isValidBoard(board)) {
+
+            JOptionPane.showMessageDialog(
+                    this,
+                    "There are duplicate or invalid values.",
+                    "Validation",
+                    JOptionPane.WARNING_MESSAGE
+            );
+
+            statusLabel.setText(
+                    "Validation failed."
+            );
+
+            return;
+        }
+
+        int emptyCells = 0;
+
+        for (int r = 0; r < SIZE; r++) {
+
+            for (int c = 0; c < SIZE; c++) {
+
+                if (board[r][c] == 0) {
+                    emptyCells++;
+                }
+            }
+        }
+
+        if (emptyCells > 0) {
+
+            JOptionPane.showMessageDialog(
+                    this,
+                    "The current entries are valid.\n"
+                            + "Empty cells remaining: "
+                            + emptyCells,
+                    "Validation",
+                    JOptionPane.INFORMATION_MESSAGE
+            );
+
+            statusLabel.setText(
+                    "Current entries are valid."
+            );
+
+            return;
+        }
+
+        if (solution != null &&
+                boardsEqual(
+                        board,
+                        solution
+                )) {
+
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Congratulations!\n"
+                            + "The Sudoku is correct.",
+                    "Validation",
+                    JOptionPane.INFORMATION_MESSAGE
+            );
+
+            finishGame();
+
+        } else {
+
+            JOptionPane.showMessageDialog(
+                    this,
+                    "The Sudoku is complete but contains "
+                            + "incorrect values.",
+                    "Validation",
+                    JOptionPane.WARNING_MESSAGE
+            );
+        }
+    }
+
+    // ============================================================
+    // CLEAR USER ENTRIES
+    // ============================================================
+
+    private void clearUserEntries() {
+
+        if (gameBusy ||
+                originalPuzzle == null) {
+
+            return;
+        }
+
+        for (int r = 0; r < SIZE; r++) {
+
+            for (int c = 0; c < SIZE; c++) {
+
+                if (originalPuzzle[r][c] == 0) {
+
+                    cells[r][c].setText("");
+
+                    cells[r][c].setBackground(
+                            Color.WHITE
+                    );
+                }
+            }
+        }
+
+        statusLabel.setText(
+                "User entries cleared."
+        );
+    }
+
+    // ============================================================
+    // BOARD VALIDATION
+    // ============================================================
+
+    private boolean isValidBoard(
+            int[][] board) {
+
+        if (board == null ||
+                board.length != SIZE) {
+
+            return false;
+        }
+
+        for (int r = 0; r < SIZE; r++) {
+
+            if (board[r].length != SIZE) {
+                return false;
+            }
+
+            for (int c = 0; c < SIZE; c++) {
+
+                int value =
+                        board[r][c];
+
+                if (value < 0 ||
+                        value > SIZE) {
+
+                    return false;
+                }
+
+                if (value != 0) {
+
+                    board[r][c] = 0;
+
+                    boolean safe =
+                            isSafe(
+                                    board,
+                                    r,
+                                    c,
+                                    value
+                            );
+
+                    board[r][c] =
+                            value;
+
+                    if (!safe) {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        return true;
+    }
+
+    // ============================================================
+    // BOARD COMPLETE
+    // ============================================================
+
+    private boolean isBoardComplete(
+            int[][] board) {
+
+        for (int r = 0; r < SIZE; r++) {
+
+            for (int c = 0; c < SIZE; c++) {
+
+                if (board[r][c] == 0) {
+                    return false;
+                }
+            }
+        }
+
+        return isValidBoard(board);
+    }
+
+    // ============================================================
+    // FINISH GAME
+    // ============================================================
+
+    private void finishGame() {
+
+        if (!gameRunning) {
+            return;
+        }
+
+        // --------------------------------------------------------
+        // IMPORTANT FIX #2
+        // Store the final elapsed time BEFORE stopping the game.
+        // --------------------------------------------------------
+
+        finalElapsedTime =
+                (System.currentTimeMillis()
+                        - startTime) / 1000;
+
+        gameRunning = false;
+
+        stopGameTimer();
+
+        updateTimer();
+
+        updateScore();
+
+        statusLabel.setText(
+                "Game completed!"
+        );
+
+        for (int r = 0; r < SIZE; r++) {
+
+            for (int c = 0; c < SIZE; c++) {
+
+                cells[r][c].setBackground(
+                        new Color(
+                                225,
+                                245,
+                                225
+                        )
+                );
+            }
+        }
+    }
+
+    // ============================================================
+    // TIMER
+    // ============================================================
+
+    private void startGameTimer() {
+
+        startTime =
+                System.currentTimeMillis();
+
+        finalElapsedTime = 0;
+
+        gameRunning = true;
+
+        if (gameTimer != null) {
+            gameTimer.stop();
+        }
+
+        // IMPORTANT FIX #4
+        gameTimer =
+                new javax.swing.Timer(
+                        1000,
+                        e -> updateTimer()
+                );
+
+        gameTimer.start();
+
+        updateTimer();
+    }
+
+    private void stopGameTimer() {
+
+        if (gameTimer != null) {
+
+            gameTimer.stop();
+
+            gameTimer = null;
+        }
+    }
+
+    private long getElapsedSeconds() {
+
+        if (gameRunning) {
+
+            return (
+                    System.currentTimeMillis()
+                            - startTime
+            ) / 1000;
+        }
+
+        return finalElapsedTime;
+    }
+
+    private void updateTimer() {
+
+        long elapsed =
+                getElapsedSeconds();
+
+        long minutes =
+                elapsed / 60;
+
+        long seconds =
+                elapsed % 60;
+
+        timerLabel.setText(
+                String.format(
+                        "Time: %02d:%02d",
+                        minutes,
+                        seconds
+                )
+        );
+
+        updateScore();
+    }
+
+    // ============================================================
+    // SCORE
+    // ============================================================
+
+    private void updateScore() {
+
+        String difficulty =
+                difficultyBox
+                        .getSelectedItem()
+                        .toString();
+
+        int difficultyBonus;
+
+        if (difficulty.equals("Easy")) {
+
+            difficultyBonus = 100;
+
+        } else if (difficulty.equals("Medium")) {
+
+            difficultyBonus = 200;
+
+        } else {
+
+            difficultyBonus = 300;
+        }
+
+        int sizeBonus;
+
+        if (SIZE == 6) {
+
+            sizeBonus = 0;
+
+        } else if (SIZE == 9) {
+
+            sizeBonus = 50;
+
+        } else {
+
+            sizeBonus = 150;
+        }
+
+        long elapsed =
+                getElapsedSeconds();
+
+        int score =
+                difficultyBonus
+                        + sizeBonus
+                        - mistakes * 20
+                        - hints * 15
+                        - (int) (elapsed / 10);
+
+        score =
+                Math.max(
+                        score,
+                        0
+                );
+
+        scoreLabel.setText(
+                "Score: " + score
+        );
+    }
+
+    // ============================================================
+    // GAME INFORMATION
+    // ============================================================
+
+    private void updateGameInformation() {
+
+        mistakesLabel.setText(
+                "Mistakes: " + mistakes
+        );
+
+        hintsLabel.setText(
+                "Hints: " + hints
+        );
+
+        updateScore();
+    }
+
+    // ============================================================
+    // ENABLE / DISABLE CONTROLS
+    // ============================================================
+
+    private void setControlsEnabled(
+            boolean enabled) {
+
+        sizeBox.setEnabled(enabled);
+
+        difficultyBox.setEnabled(enabled);
+
+        newPuzzleButton.setEnabled(enabled);
+
+        solveButton.setEnabled(enabled);
+
+        animateButton.setEnabled(enabled);
+
+        hintButton.setEnabled(enabled);
+
+        validateButton.setEnabled(enabled);
+
+        clearButton.setEnabled(enabled);
+
+        saveButton.setEnabled(enabled);
+
+        loadButton.setEnabled(enabled);
+    }
+
+    // ============================================================
+    // SAVE PUZZLE
+    // ============================================================
+
+    private void savePuzzle() {
+
+        if (originalPuzzle == null ||
+                solution == null) {
+
+            JOptionPane.showMessageDialog(
+                    this,
+                    "There is no puzzle to save.",
+                    "Save",
+                    JOptionPane.WARNING_MESSAGE
+            );
+
+            return;
+        }
+
+        JFileChooser chooser =
+                new JFileChooser();
+
+        chooser.setDialogTitle(
+                "Save Sudoku Puzzle"
+        );
+
+        if (chooser.showSaveDialog(this)
+                != JFileChooser.APPROVE_OPTION) {
+
+            return;
+        }
+
+        File file =
+                chooser.getSelectedFile();
+
+        try (BufferedWriter writer =
+                     new BufferedWriter(
+                             new FileWriter(file)
+                     )) {
+
+            writer.write(
+                    "ADVANCED_SUDOKU_MULTI_V3"
+            );
+
+            writer.newLine();
+
+            writer.write(
+                    "SIZE=" + SIZE
+            );
+
+            writer.newLine();
+
+            writer.write(
+                    "DIFFICULTY="
+                            + difficultyBox
+                            .getSelectedItem()
+            );
+
+            writer.newLine();
+
+            writer.write(
+                    "MISTAKES="
+                            + mistakes
+            );
+
+            writer.newLine();
+
+            writer.write(
+                    "HINTS="
+                            + hints
+            );
+
+            writer.newLine();
+
+            writer.write(
+                    "ELAPSED="
+                            + getElapsedSeconds()
+            );
+
+            writer.newLine();
+
+            writer.write(
+                    "ORIGINAL"
+            );
+
+            writer.newLine();
+
+            writeBoard(
+                    writer,
+                    originalPuzzle
+            );
+
+            writer.write(
+                    "CURRENT"
+            );
+
+            writer.newLine();
+
+            writeBoard(
+                    writer,
+                    readBoard()
+            );
+
+            writer.write(
+                    "SOLUTION"
+            );
+
+            writer.newLine();
+
+            writeBoard(
+                    writer,
+                    solution
+            );
+
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Puzzle saved successfully.",
+                    "Save",
+                    JOptionPane.INFORMATION_MESSAGE
+            );
+
+        } catch (IOException ex) {
+
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Error saving puzzle:\n"
+                            + ex.getMessage(),
+                    "Save Error",
+                    JOptionPane.ERROR_MESSAGE
+            );
+        }
+    }
+
+    // ============================================================
+    // WRITE BOARD
+    // ============================================================
+
+    private void writeBoard(
+            BufferedWriter writer,
+            int[][] board)
+            throws IOException {
+
+        for (int r = 0; r < SIZE; r++) {
+
+            for (int c = 0; c < SIZE; c++) {
+
+                if (c > 0) {
+                    writer.write(" ");
+                }
+
+                writer.write(
+                        Integer.toString(
+                                board[r][c]
+                        )
+                );
+            }
+
+            writer.newLine();
+        }
+    }
+
+    // ============================================================
+    // LOAD PUZZLE
+    // ============================================================
+
+    private void loadPuzzle() {
+
+        if (gameBusy) {
+            return;
+        }
+
+        JFileChooser chooser =
+                new JFileChooser();
+
+        chooser.setDialogTitle(
+                "Load Sudoku Puzzle"
+        );
+
+        if (chooser.showOpenDialog(this)
+                != JFileChooser.APPROVE_OPTION) {
+
+            return;
+        }
+
+        File file =
+                chooser.getSelectedFile();
+
+        try (BufferedReader reader =
+                     new BufferedReader(
+                             new FileReader(file)
+                     )) {
+
+            String header =
+                    reader.readLine();
+
+            if (!"ADVANCED_SUDOKU_MULTI_V3"
+                    .equals(header)) {
+
+                throw new IOException(
+                        "Unsupported or invalid Sudoku file."
+                );
+            }
+
+            String sizeLine =
+                    reader.readLine();
+
+            if (sizeLine == null ||
+                    !sizeLine.startsWith("SIZE=")) {
+
+                throw new IOException(
+                        "Missing Sudoku size."
+                );
+            }
+
+            int loadedSize =
+                    Integer.parseInt(
+                            sizeLine.substring(
+                                    "SIZE=".length()
+                            )
+                    );
+
+            if (loadedSize != 6 &&
+                    loadedSize != 9 &&
+                    loadedSize != 16) {
+
+                throw new IOException(
+                        "Unsupported Sudoku size."
+                );
+            }
+
+            // Difficulty
+            String difficultyLine =
+                    reader.readLine();
+
+            if (difficultyLine == null ||
+                    !difficultyLine.startsWith(
+                            "DIFFICULTY="
+                    )) {
+
+                throw new IOException(
+                        "Missing difficulty."
+                );
+            }
+
+            String loadedDifficulty =
+                    difficultyLine.substring(
+                            "DIFFICULTY=".length()
+                    );
+
+            // Mistakes
+            String mistakesLine =
+                    reader.readLine();
+
+            if (mistakesLine == null ||
+                    !mistakesLine.startsWith(
+                            "MISTAKES="
+                    )) {
+
+                throw new IOException(
+                        "Missing mistakes data."
+                );
+            }
+
+            int loadedMistakes =
+                    Integer.parseInt(
+                            mistakesLine.substring(
+                                    "MISTAKES=".length()
+                            )
+                    );
+
+            // Hints
+            String hintsLine =
+                    reader.readLine();
+
+            if (hintsLine == null ||
+                    !hintsLine.startsWith(
+                            "HINTS="
+                    )) {
+
+                throw new IOException(
+                        "Missing hints data."
+                );
+            }
+
+            int loadedHints =
+                    Integer.parseInt(
+                            hintsLine.substring(
+                                    "HINTS=".length()
+                            )
+                    );
+
+            // Elapsed time
+            String elapsedLine =
+                    reader.readLine();
+
+            if (elapsedLine == null ||
+                    !elapsedLine.startsWith(
+                            "ELAPSED="
+                    )) {
+
+                throw new IOException(
+                        "Missing elapsed time."
+                );
+            }
+
+            long loadedElapsed =
+                    Long.parseLong(
+                            elapsedLine.substring(
+                                    "ELAPSED=".length()
+                            )
+                    );
+
+            // Original
+            if (!"ORIGINAL".equals(
+                    reader.readLine()
+            )) {
+
+                throw new IOException(
+                        "Missing ORIGINAL section."
+                );
+            }
+
+            int[][] loadedOriginal =
+                    readSavedBoard(
+                            reader,
+                            loadedSize
+                    );
+
+            // Current
+            if (!"CURRENT".equals(
+                    reader.readLine()
+            )) {
+
+                throw new IOException(
+                        "Missing CURRENT section."
+                );
+            }
+
+            int[][] loadedCurrent =
+                    readSavedBoard(
+                            reader,
+                            loadedSize
+                    );
+
+            // Solution
+            if (!"SOLUTION".equals(
+                    reader.readLine()
+            )) {
+
+                throw new IOException(
+                        "Missing SOLUTION section."
+                );
+            }
+
+            int[][] loadedSolution =
+                    readSavedBoard(
+                            reader,
+                            loadedSize
+                    );
+
+            // ----------------------------------------------------
+            // Validate loaded file
+            // ----------------------------------------------------
+
+            validateLoadedData(
+                    loadedSize,
+                    loadedOriginal,
+                    loadedCurrent,
+                    loadedSolution
+            );
+
+            // ----------------------------------------------------
+            // Apply loaded configuration
+            // ----------------------------------------------------
+
+            if (loadedSize == 6) {
+
+                sizeBox.setSelectedItem(
+                        "6 × 6"
+                );
+
+            } else if (loadedSize == 9) {
+
+                sizeBox.setSelectedItem(
+                        "9 × 9"
+                );
+
+            } else {
+
+                sizeBox.setSelectedItem(
+                        "16 × 16"
+                );
+            }
+
+            updateBoardConfiguration();
+
+            createGrid();
+
+            originalPuzzle =
+                    loadedOriginal;
+
+            solution =
+                    loadedSolution;
+
+            mistakes =
+                    Math.max(
+                            loadedMistakes,
+                            0
+                    );
+
+            hints =
+                    Math.max(
+                            loadedHints,
+                            0
+                    );
+
+            finalElapsedTime =
+                    Math.max(
+                            loadedElapsed,
+                            0
+                    );
+
+            displayLoadedCurrentBoard(
+                    loadedCurrent
+            );
+
+            difficultyBox.setSelectedItem(
+                    loadedDifficulty
+            );
+
+            gameRunning = false;
+
+            stopGameTimer();
+
+            updateTimer();
+
+            updateGameInformation();
+
+            statusLabel.setText(
+                    "Puzzle loaded successfully."
+            );
+
+        } catch (Exception ex) {
+
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Unable to load puzzle:\n"
+                            + ex.getMessage(),
+                    "Load Error",
+                    JOptionPane.ERROR_MESSAGE
+            );
+        }
+    }
+
+    // ============================================================
+    // READ SAVED BOARD
+    // ============================================================
+
+    private int[][] readSavedBoard(
+            BufferedReader reader,
+            int size)
+            throws IOException {
+
+        int[][] board =
+                new int[size][size];
+
+        for (int r = 0; r < size; r++) {
+
+            String line =
+                    reader.readLine();
+
+            if (line == null) {
+
+                throw new IOException(
+                        "Unexpected end of file."
+                );
+            }
+
+            String[] parts =
+                    line.trim().split(
+                            "\\s+"
+                    );
+
+            if (parts.length != size) {
+
+                throw new IOException(
+                        "Invalid row length."
+                );
+            }
+
+            for (int c = 0; c < size; c++) {
+
+                int value =
+                        Integer.parseInt(
+                                parts[c]
+                        );
+
+                if (value < 0 ||
+                        value > size) {
+
+                    throw new IOException(
+                            "Invalid Sudoku value."
+                    );
+                }
+
+                board[r][c] =
+                        value;
+            }
+        }
+
+        return board;
+    }
+
+    // ============================================================
+    // VALIDATE LOADED DATA
+    // ============================================================
+
+   private void validateLoadedData(
+        int loadedSize,
+        int[][] loadedOriginal,
+        int[][] loadedCurrent,
+        int[][] loadedSolution) throws IOException {
+
+    int oldSize = SIZE;
+
+    int oldBoxRows = BOX_ROWS;
+    int oldBoxCols = BOX_COLS;
+
+    SIZE = loadedSize;
+
+    if (SIZE == 6) {
+
+        BOX_ROWS = 2;
+        BOX_COLS = 3;
+
+    } else if (SIZE == 9) {
+
+        BOX_ROWS = 3;
+        BOX_COLS = 3;
+
+    } else if (SIZE == 16) {
+
+        BOX_ROWS = 4;
+        BOX_COLS = 4;
+
+    } else {
+
+        throw new IOException(
+                "Unsupported Sudoku size."
+        );
+    }
+
+    try {
+
+        // Validate original puzzle
+        if (!isValidBoard(
+                copyBoard(loadedOriginal))) {
+
+            throw new IOException(
+                    "Original puzzle is invalid."
+            );
+        }
+
+        // Validate current board
+        if (!isValidBoard(
+                copyBoard(loadedCurrent))) {
+
+            throw new IOException(
+                    "Current puzzle is invalid."
+            );
+        }
+
+        // Validate solution
+        if (!isValidBoard(
+                copyBoard(loadedSolution))) {
+
+            throw new IOException(
+                    "Solution is invalid."
+            );
+        }
+
+        // Solution must be complete
+        if (!isBoardComplete(
+                loadedSolution)) {
+
+            throw new IOException(
+                    "Solution is incomplete."
+            );
+        }
+
+        // Check original clues against solution
+        for (int r = 0; r < SIZE; r++) {
+
+            for (int c = 0; c < SIZE; c++) {
+
+                // Original clue must match solution
+                if (loadedOriginal[r][c] != 0 &&
+                        loadedOriginal[r][c]
+                                != loadedSolution[r][c]) {
+
+                    throw new IOException(
+                            "Original puzzle does not match solution."
+                    );
+                }
+
+                // Original clue cannot be modified
+                if (loadedOriginal[r][c] != 0 &&
+                        loadedCurrent[r][c]
+                                != loadedOriginal[r][c]) {
+
+                    throw new IOException(
+                            "An original Sudoku clue was modified."
+                    );
+                }
+
+                // Current value must match solution
+                if (loadedCurrent[r][c] != 0 &&
+                        loadedCurrent[r][c]
+                                != loadedSolution[r][c]) {
+
+                    throw new IOException(
+                            "Current board contains an incorrect value."
+                    );
+                }
+            }
+        }
+
+    } finally {
+
+        // Restore current configuration
+        SIZE = oldSize;
+
+        BOX_ROWS = oldBoxRows;
+        BOX_COLS = oldBoxCols;
+    }
+}
+    // ============================================================
+    // DISPLAY LOADED CURRENT BOARD
+    // ============================================================
+
+    private void displayLoadedCurrentBoard(
+            int[][] current) {
+
+        for (int r = 0; r < SIZE; r++) {
+
+            for (int c = 0; c < SIZE; c++) {
+
+                int value =
+                        current[r][c];
+
+                if (value == 0) {
+
+                    cells[r][c].setText("");
+
+                } else {
+
+                    cells[r][c].setText(
+                            valueToSymbol(value)
+                    );
+                }
+
+                if (originalPuzzle[r][c] != 0) {
+
+                    cells[r][c].setEditable(false);
+
+                    cells[r][c].setBackground(
+                            new Color(
+                                    235,
+                                    235,
+                                    235
+                            )
+                    );
+
+                } else {
+
+                    cells[r][c].setEditable(true);
+
+                    cells[r][c].setBackground(
+                            Color.WHITE
+                    );
+                }
+            }
+        }
+
+        boardPanel.revalidate();
+        boardPanel.repaint();
+    }
+
+    // ============================================================
+    // COPY BOARD
+    // ============================================================
+
+    private int[][] copyBoard(
+            int[][] board) {
+
+        int[][] copy =
+                new int[board.length][];
+
+        for (int i = 0;
+             i < board.length;
+             i++) {
+
+            copy[i] =
+                    board[i].clone();
+        }
+
+        return copy;
+    }
+
+    // ============================================================
+    // BOARDS EQUAL
+    // ============================================================
+
+    private boolean boardsEqual(
+            int[][] first,
+            int[][] second) {
+
+        if (first == null ||
+                second == null ||
+                first.length != second.length) {
+
+            return false;
+        }
+
+        for (int r = 0;
+             r < first.length;
+             r++) {
+
+            if (first[r].length !=
+                    second[r].length) {
+
+                return false;
+            }
+
+            for (int c = 0;
+                 c < first[r].length;
+                 c++) {
+
+                if (first[r][c] !=
+                        second[r][c]) {
+
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    // ============================================================
+    // MAIN METHOD
+    // ============================================================
+
+    public static void main(
+            String[] args) {
+
+        SwingUtilities.invokeLater(
+                () -> {
+
+                    try {
+
+                        UIManager.setLookAndFeel(
+                                UIManager
+                                        .getSystemLookAndFeelClassName()
+                        );
+
+                    } catch (Exception ignored) {
+                    }
+
+                    SudokuSolver app =
+                            new SudokuSolver();
+
+                    app.setVisible(true);
+                }
+        );
     }
 }
